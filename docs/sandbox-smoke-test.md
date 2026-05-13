@@ -1,6 +1,8 @@
-# Sandbox smoke-test runbook (Day 2 close)
+# Sandbox smoke-test runbook
 
-This is the **end-to-end gate** for Day 2 — verifies the headless invocation, reusable workflow, marker durability, and digest comment work together against a real GitHub-hosted consumer repo. Do this BEFORE pointing the orchestrator at ai-viz.
+This is the **end-to-end gate** that verifies the headless invocation, reusable workflow, marker durability, and digest comment work together against a real GitHub-hosted consumer repo. Run this before pointing the orchestrator at a new consumer.
+
+> **Status as of 2026-05-13:** All 5 scenarios PASSED on `rsm0508/orchestrator-sandbox` (~$0.13 total spend) and four cloud-install bugs were caught + fixed in flight. This runbook has been revised post-smoke to match observed behavior. See `docs/findings/cloud-install-trap.md` for the load-bearing diagnosis (npm-10 git-URL dangling symlink) and `docs/handoffs/day-3-kickoff.md` for the close summary.
 
 ## Why a sandbox
 
@@ -12,20 +14,15 @@ Per the Day 2 kickoff doc: "Test against a sandbox consumer repo (NOT ai-viz yet
 
 ## Prereqs (one-time)
 
-1. **Push session-orchestrator to GitHub.** Roman creates `rsm0508/session-orchestrator` (private initially) and pushes the local `main` branch.
+`rsm0508/session-orchestrator` is **public** (Day-3 Q1 decision), so no PAT or
+access-policy step is required. Consumers only need the API key + workflow
+permissions below.
 
-   ```bash
-   gh repo create rsm0508/session-orchestrator --private --source=. --remote=origin
-   git push -u origin main
-   ```
+1. **Create a sandbox consumer repo.** Empty repo, e.g. `rsm0508/orchestrator-sandbox`. Clone locally for setup.
 
-2. **Create a sandbox consumer repo.** Empty private repo, e.g. `rsm0508/orchestrator-sandbox`. Clone locally for setup.
+2. **Set sandbox repo secrets:** `ANTHROPIC_API_KEY` (your real key). In sandbox repo Settings → Secrets and variables → Actions → New repository secret.
 
-3. **Generate a PAT.** Classic PAT with `repo` scope, or fine-grained PAT with read access to `rsm0508/session-orchestrator`. Required if session-orchestrator stays private. Store as `SESSION_ORCHESTRATOR_PAT` secret in the sandbox repo.
-
-4. **Set sandbox repo secrets:** `ANTHROPIC_API_KEY` (your real key), `SESSION_ORCHESTRATOR_PAT` (the PAT from step 3). In sandbox repo Settings → Secrets and variables → Actions → New repository secret.
-
-5. **Verify default token permissions.** Repo Settings → Actions → General → Workflow permissions → "Read and write permissions" + "Allow GitHub Actions to create and approve pull requests". (The consumer template grants explicit `permissions:` but it can only narrow from this.)
+3. **Verify default token permissions.** Repo Settings → Actions → General → Workflow permissions → "Read and write permissions" + "Allow GitHub Actions to create and approve pull requests". (The consumer template grants explicit `permissions:` but it can only narrow from this.)
 
 ## Sandbox repo files
 
@@ -111,7 +108,7 @@ git checkout main
 
 **What this proves:** end-to-end wiring works — orchestrator fires, session creates branch + PR, markers persist, digest lands.
 
-### Scenario 3 — Concurrent fire collision (verifies the [P1] R1 race fix)
+### Scenario 3 — Stale `.started` blocks readiness (verifies the resolver)
 
 1. Manually create `.session-orchestrator/phase-2.started` on `main` (sim a stale marker from a crashed prior run):
    ```bash
@@ -122,9 +119,15 @@ git checkout main
    ```
 2. Author `docs/handoffs/sandbox-phase-2-kickoff.md` (any content). Commit + push.
 3. Trigger the workflow.
-4. Expected: workflow refuses phase 2 with `REFUSED — phase already has a .started marker`. Exit code 4. NO PR created, NO digest comment (no fire happened).
+4. Expected:
+   - `session-orchestrator next` reports `kind=not-ready` (resolver short-circuit, NOT the wrapper-level REFUSED path).
+   - Workflow step "Report not-ready state" emits a `::notice` annotation explaining no phase is ready.
+   - Job exit code **0** (the workflow's `kind == 'ready'` guard skips both `fire` and the marker-commit + digest steps).
+   - No PR, no digest comment, no marker writes from this run.
 
-**What this proves:** marker collision detection works; the operator-cleanup path is documented in the log.
+> The wrapper-level `REFUSED — phase already has a .started marker` path (exit 4) is reachable only on a true race: resolver reports ready, then a `.started` marker appears before the wrapper's pre-fire write. A single `workflow_dispatch` cannot trigger it.
+
+**What this proves:** the resolver treats a pre-existing `.started` as "not ready" and the workflow refuses to fire — no operator intervention needed, no cost incurred.
 
 ### Scenario 4 — Failed fire + retry (verifies R3 [P1] marker durability)
 
@@ -138,7 +141,9 @@ Hardest scenario — verifies the most-load-bearing safety guarantee.
    - `phase-2.started` AND `phase-2.failed` BOTH commit + push to `main`.
    - Digest comment lands on issue #1 with FAILED status + retry instructions.
 5. **Manually trigger the workflow again** (sim cron tick).
-6. Expected: `session-orchestrator next` reports `phase-failed-blocked` — refuses to advance. Workflow does NOT re-fire phase 2.
+6. Expected: `session-orchestrator next` reports `kind=not-ready` with a human-readable annotation along the lines of
+   _"Phase 2 has a .failed marker at .session-orchestrator/phase-2.failed — orchestrator refuses to advance until an operator deletes both .started and .failed..."_
+   Workflow exits 0 with a `::notice`; nothing fires.
 
 **What this proves:** failed markers are durable across runs; failed phases block readiness globally; operator must intervene.
 
@@ -156,9 +161,9 @@ Hardest scenario — verifies the most-load-bearing safety guarantee.
 
 **What this proves:** the documented retry path works as advertised.
 
-## Acceptance for Day 2 close
+## Acceptance
 
-All five scenarios pass on the sandbox. THEN — and only then — open the Day 3 kickoff handoff and start wiring ai-viz as the first real consumer.
+All five scenarios pass on the sandbox before the orchestrator is pointed at a new consumer. The Day-2 sandbox-smoke gate (2026-05-13) is the canonical baseline run.
 
 ## Estimated cost
 

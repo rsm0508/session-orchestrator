@@ -10,9 +10,22 @@
 4. `~/.claude/projects/C--Users-roman-Documents-----FS-Projects/memory/feedback_codex_review_rhythm.md` — cross-project Codex review protocol (Working Principle B).
 5. This document.
 
-## Open product questions — surface to Roman BEFORE coding
+## Decisions locked (2026-05-13)
 
-Five decisions worth locking via `AskUserQuestion` before any Day-3 commits land.
+Surfaced via `AskUserQuestion` at Day-3 session open. These are the operating
+assumptions for the rest of Day 3 — do not re-derive without explicit re-approval.
+
+| Q | Decision |
+|---|---|
+| Q1 | **Keep `rsm0508/session-orchestrator` public.** Remove `SESSION_ORCHESTRATOR_PAT` from consumer template + workflow install step. |
+| Q2 | **Tag v0.1.0 BEFORE ai-viz wiring.** ai-viz pins to `v0.1.0` from day one. |
+| Q3 | **Slack E2E in scope.** Roman's personal Slack + dedicated `#orchestrator-test` channel; webhook secret on sandbox repo. |
+| Q4 | **Reset sandbox to clean state.** Close PRs #4 + #5, delete branches, delete markers, reset config budget. Sandbox stays as a regression-test bed. |
+| Q5 | **SHA pins only.** Pin `actions/*` to SHAs in v0.1.0. `npm audit` + actionlint deferred to v0.2. |
+
+## Open product questions (resolved — kept for context)
+
+Five decisions surfaced at Day-3 open. See lock table above for chosen options.
 
 ### Q1. `rsm0508/session-orchestrator` visibility — keep public, or revert to private?
 
@@ -110,12 +123,12 @@ After Q1-Q5 are answered:
    - `.github/workflows/orchestrator.yml` (copy + adapt the consumer template; reference `rsm0508/session-orchestrator/.github/workflows/run-next-phase.yml@v0.1.0`)
    - Dry-run first via `workflow_dispatch`. Real fire only after Roman approves.
 
-### P3 — backlog (per Q5 decision)
+### P3 — backlog
 
-8. `npm audit` — try `npm install --save-dev vitest@latest` and re-run tests. If still flagged, escalate.
-9. `actions/*` SHA pins — Dependabot or `gh api repos/actions/checkout/git/refs/tags/v5`.
-10. `actionlint` CI step — install the binary in a new `.github/workflows/lint-workflows.yml`.
-11. **Slack webhook E2E** (per Q3).
+8. `npm audit` — try `npm install --save-dev vitest@latest` and re-run tests. If still flagged, escalate. (Q5: deferred to v0.2)
+9. ~~`actions/*` SHA pins~~ — shipped in v0.1.0 (Q5).
+10. `actionlint` CI step — install the binary in a new `.github/workflows/lint-workflows.yml`. (Q5: deferred to v0.2)
+11. **Wire Linear-label kill-switch in GHA runtime** — the lib seam (`checkLinearLabel` callback) exists but `next.ts` never attaches one. v0.1.0 README documents this as "local-CLI-only" pending v0.2 wiring. Caught by codex day-3-p1-R1 [P2]. Plan: add `LINEAR_API_KEY` + `linear_team` reads to `next.ts`, implement the API check, gate behind config presence.
 
 ### Cleanup (small, opportunistic)
 

@@ -41,8 +41,6 @@ on:
     secrets:
       ANTHROPIC_API_KEY:
         required: true
-      SESSION_ORCHESTRATOR_PAT:
-        required: false # required only if rsm0508/session-orchestrator is private
       LINEAR_API_KEY:
         required: false # reserved for the kill-switch Linear-label seam (Day 3)
       SLACK_WEBHOOK_URL:
@@ -66,16 +64,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: ${{ fromJSON(inputs.timeout-minutes) }}
     steps:
-      # TODO(supply-chain): pin actions/* by SHA before production. Using
-      # major tags during Day 2 development for readability. Dependabot or
-      # `gh api repos/actions/checkout/git/refs/tags/v5` can resolve.
+      # Supply-chain: actions/* pinned by SHA per Day-3 Q5 decision. To bump:
+      # `gh api repos/actions/<name>/git/refs/tags/v5 --jq '.object.sha'` then
+      # cross-reference `repos/actions/<name>/tags` for the concrete version.
       - name: Checkout consumer repo (default branch, regardless of trigger)
         # Codex workflow-R1 [P1] fix: actions/checkout's default ref varies by
         # trigger (PR base for pull_request, default branch for schedule).
         # That divergence means a cron run wouldn't see markers written by a
         # PR-triggered run on `feat/X`, and would re-fire phases. Force the
         # default branch on every trigger so all runs share one marker view.
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 1
@@ -84,7 +82,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node 22
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '22'
 
@@ -93,9 +91,6 @@ jobs:
 
       - name: Install session-orchestrator CLI
         env:
-          # Embedded into the git clone URL only when the PAT secret is set
-          # (private rsm0508/session-orchestrator case). Never echoed.
-          SESSION_ORCHESTRATOR_PAT: ${{ secrets.SESSION_ORCHESTRATOR_PAT }}
           ORCH_REF: ${{ inputs.orchestrator-ref }}
         run: |
           set -e
@@ -105,24 +100,19 @@ jobs:
           # found" at runtime (reproduced locally on node:22 image, both with
           # github: shortcut and explicit git+file:// URLs). Fetch the ref
           # explicitly, pack, then install from the tarball: same internal
-          # flow npm intends, but bypasses the broken git-URL hand-off.
-          # `git init + git fetch <ref>` (not `git clone --branch <ref>`)
-          # is required because the workflow input contract supports SHAs
-          # in addition to branch/tag names, and --branch rejects raw SHAs.
-          # Day-3 cleanup: switch to a published-tarball install once we
-          # tag a release.
+          # flow npm intends, but bypasses the broken git-URL hand-off. See
+          # docs/findings/cloud-install-trap.md for the full diagnosis.
+          # `git init + git fetch <ref>` (not `git clone --branch <ref>`) is
+          # required because the workflow input contract supports SHAs in
+          # addition to branch/tag names, and --branch rejects raw SHAs.
+          # Repo is public (Day-3 Q1 decision); no PAT path needed.
           TMPDIR=$(mktemp -d)
           SO_DIR="$TMPDIR/so"
           mkdir "$SO_DIR"
           cd "$SO_DIR"
           git init -q -b main
-          if [ -n "$SESSION_ORCHESTRATOR_PAT" ]; then
-            git remote add origin "https://${SESSION_ORCHESTRATOR_PAT}@github.com/rsm0508/session-orchestrator.git"
-            git fetch --depth 1 origin "$ORCH_REF" > /dev/null 2>&1
-          else
-            git remote add origin https://github.com/rsm0508/session-orchestrator.git
-            git fetch --depth 1 origin "$ORCH_REF"
-          fi
+          git remote add origin https://github.com/rsm0508/session-orchestrator.git
+          git fetch --depth 1 origin "$ORCH_REF"
           git checkout -q FETCH_HEAD
           TARBALL=$(npm pack --silent)
           npm install -g "$SO_DIR/$TARBALL"
@@ -132,6 +122,14 @@ jobs:
 
       - name: Resolve next ready phase
         id: next
+        env:
+          # Codex day-3-p1-R1 [P2] fix: the env-var kill-switch path is a
+          # locked Day-1 product decision but the workflow never propagated
+          # repo/org Variables into the resolver process. Setting an Action
+          # Variable `SESSION_ORCHESTRATOR_PAUSED=true` at repo or org level
+          # now halts the run; the kill-switch lib still treats empty / falsy
+          # values as inactive.
+          SESSION_ORCHESTRATOR_PAUSED: ${{ vars.SESSION_ORCHESTRATOR_PAUSED }}
         run: |
           set -e
           OUTPUT=$(session-orchestrator next --json)

@@ -4,9 +4,8 @@
 # Prereqs in the consumer repo:
 #   - .session-orchestrator/config.yml (see examples/.session-orchestrator/config.yml)
 #   - Repo secret ANTHROPIC_API_KEY set in Settings → Secrets and variables → Actions.
-#   - If rsm0508/session-orchestrator is private: also set SESSION_ORCHESTRATOR_PAT
-#     (a GitHub PAT with read access to that repo).
 #   - Optional: SLACK_WEBHOOK_URL secret for per-fire Slack pings.
+#   - Optional: LINEAR_API_KEY for the kill-switch Linear-label seam.
 #
 # Trigger model (locked Day 1 decision):
 #   - Event-driven: every PR merge to the configured feature branch.
@@ -68,9 +67,6 @@ jobs:
 
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      # Required only if rsm0508/session-orchestrator is private. Drop this
-      # line when the repo goes public.
-      SESSION_ORCHESTRATOR_PAT: ${{ secrets.SESSION_ORCHESTRATOR_PAT }}
       # Optional.
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
