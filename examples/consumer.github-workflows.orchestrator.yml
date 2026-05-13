@@ -4,6 +4,8 @@
 # Prereqs in the consumer repo:
 #   - .session-orchestrator/config.yml (see examples/.session-orchestrator/config.yml)
 #   - Repo secret ANTHROPIC_API_KEY set in Settings → Secrets and variables → Actions.
+#   - Repo secret OPENAI_API_KEY set in same place — REQUIRED as of v0.3.0; used by
+#     the fired session's per-artifact `codex review` calls.
 #   - Optional: SLACK_WEBHOOK_URL secret for per-fire Slack pings.
 #   - Optional: LINEAR_API_KEY for the kill-switch Linear-label seam.
 #
@@ -67,6 +69,7 @@ jobs:
 
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       # Optional.
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

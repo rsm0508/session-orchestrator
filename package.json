@@ -1,6 +1,6 @@
 {
   "name": "session-orchestrator",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Autonomous session-orchestration layer that fires fresh Claude Code sessions to advance multi-phase projects between phases.",
   "license": "MIT",
   "author": "Roman <roman@fullsession.io>",

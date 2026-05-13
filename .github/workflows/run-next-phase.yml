@@ -34,12 +34,18 @@ on:
         required: false
         default: false
       timeout-minutes:
-        description: 'Wall-clock job timeout. Defaults to 30 minutes.'
+        description: 'Wall-clock job timeout. Defaults to 60 minutes — Claude + per-artifact Codex review can comfortably exceed 30.'
         type: number
         required: false
-        default: 30
+        default: 60
     secrets:
       ANTHROPIC_API_KEY:
+        required: true
+      # v0.3.0: Codex CLI is now installed alongside Claude Code so the
+      # fired session can run `codex review` per artifact per the operating
+      # rhythm (Working Principle B). Required because the headless session
+      # cannot fall back to a manual Codex pass.
+      OPENAI_API_KEY:
         required: true
       LINEAR_API_KEY:
         required: false # reserved for the kill-switch Linear-label seam (Day 3)
@@ -89,6 +95,33 @@ jobs:
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
+      # v0.3.0: Codex CLI is part of the fire infrastructure — the headless
+      # Claude session calls `codex review` per artifact per the operating
+      # rhythm (Working Principle B: Codex reviews my code). Without this,
+      # the fired session would have to defer review to a manual operator
+      # pass, breaking the autonomous loop.
+      #
+      # `codex review` is explicitly the non-interactive subcommand and
+      # works without a TTY — the TTY-bail concern documented in the
+      # feedback_codex_review_rhythm memory was specific to backgrounded
+      # invocations. Synchronous in-session calls work in CI.
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
+
+      # v0.3.0: provision ~/.codex/config.toml with the reasoning settings
+      # documented in feedback_codex_review_rhythm. Without this, codex
+      # defaults to `model_reasoning_effort = "none"` which makes `codex
+      # review` exit with no findings synthesis — silently useless. Pinned
+      # to "high" effort + "auto" summary so review depth matches the
+      # local Windows rhythm Roman uses for ad-hoc reviews.
+      - name: Provision Codex config
+        run: |
+          mkdir -p "$HOME/.codex"
+          cat > "$HOME/.codex/config.toml" <<'EOF'
+          model_reasoning_effort = "high"
+          model_reasoning_summary = "auto"
+          EOF
+
       - name: Install session-orchestrator CLI
         env:
           ORCH_REF: ${{ inputs.orchestrator-ref }}
@@ -119,6 +152,7 @@ jobs:
           cd - >/dev/null
           session-orchestrator --version
           claude --version
+          codex --version
 
       - name: Resolve next ready phase
         id: next
@@ -166,6 +200,11 @@ jobs:
         continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # v0.3.0: pass OPENAI_API_KEY through so the headless Claude
+          # session can shell out to `codex review` per artifact per
+          # Working Principle B. Without this, codex would prompt for
+          # `codex login` (interactive — would hang the fire).
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           # Codex workflow-R1 [P2] fix: the session needs GH auth to open
           # PRs / push branches / file issues. GITHUB_TOKEN inherits the
           # workflow's permissions block (contents/issues/pull-requests:
