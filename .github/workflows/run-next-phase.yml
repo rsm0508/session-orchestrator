@@ -151,6 +151,11 @@ jobs:
           # session fail unauthenticated.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Codex workflow-R2 [P1] fix: leave a cleanup budget for the
+          # always-run marker/digest steps. Pass an inner timeout 5 minutes
+          # SHORTER than the job's wall-clock cap so a long session can't
+          # consume the entire budget and starve cleanup.
+          SESSION_ORCHESTRATOR_TIMEOUT_MS: ${{ (fromJSON(inputs.timeout-minutes) - 5) * 60 * 1000 }}
         run: |
           set -e
           PHASE='${{ steps.next.outputs.phase }}'
