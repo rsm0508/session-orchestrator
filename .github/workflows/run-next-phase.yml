@@ -69,9 +69,15 @@ jobs:
       # TODO(supply-chain): pin actions/* by SHA before production. Using
       # major tags during Day 2 development for readability. Dependabot or
       # `gh api repos/actions/checkout/git/refs/tags/v5` can resolve.
-      - name: Checkout consumer repo
+      - name: Checkout consumer repo (default branch, regardless of trigger)
+        # Codex workflow-R1 [P1] fix: actions/checkout's default ref varies by
+        # trigger (PR base for pull_request, default branch for schedule).
+        # That divergence means a cron run wouldn't see markers written by a
+        # PR-triggered run on `feat/X`, and would re-fire phases. Force the
+        # default branch on every trigger so all runs share one marker view.
         uses: actions/checkout@v5
         with:
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 1
           # GITHUB_TOKEN scoped to the consumer repo — sufficient for
           # marker commits + digest issue comments + push back to default.
@@ -138,6 +144,13 @@ jobs:
         continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Codex workflow-R1 [P2] fix: the session needs GH auth to open
+          # PRs / push branches / file issues. GITHUB_TOKEN inherits the
+          # workflow's permissions block (contents/issues/pull-requests:
+          # write); without GH_TOKEN explicit, `gh` and `git push` from the
+          # session fail unauthenticated.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           PHASE='${{ steps.next.outputs.phase }}'
@@ -150,20 +163,60 @@ jobs:
       # R3 [P1] acceptance criterion: failure markers must be durable across
       # workflow runs, else a failed phase silently re-fires next tick.
       # We commit ONLY phase-*.{started,failed} (never the runs/ subdir).
+      #
+      # Codex workflow-R1 fixes baked in:
+      #  - [P1] Use `find` for existence-based discovery (literal glob fails
+      #    when one of .started or .failed is missing).
+      #  - [P1] Commit from an ISOLATED clean clone of the default branch.
+      #    The session may have moved HEAD to a phase branch / accumulated
+      #    work commits in the workspace; pushing HEAD here would
+      #    fast-forward the default branch with unreviewed code (or fail on
+      #    a protected branch). The temp clone gives a guaranteed-clean base.
       - name: Commit + push markers (always, even on failure)
         if: ${{ always() && steps.next.outputs.kind == 'ready' && inputs.dry-run == false }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -e
+          # Collect the marker files that actually exist in the workspace.
+          mapfile -d '' -t MARKERS < <(find .session-orchestrator -maxdepth 1 -type f \
+            \( -name 'phase-*.started' -o -name 'phase-*.failed' \) -print0)
+          if [ "${#MARKERS[@]}" -eq 0 ]; then
+            echo "No marker files in workspace; nothing to persist."
+            exit 0
+          fi
+          echo "Markers to persist: ${MARKERS[*]}"
+
+          # Capture marker contents BEFORE switching trees.
+          MARKER_BUNDLE=$(mktemp -d)
+          mkdir -p "$MARKER_BUNDLE/.session-orchestrator"
+          for m in "${MARKERS[@]}"; do
+            cp "$m" "$MARKER_BUNDLE/.session-orchestrator/$(basename "$m")"
+          done
+
+          # Fresh clone of the default branch into a side dir — guaranteed
+          # clean even if the session moved HEAD or accumulated working-tree
+          # changes. Shallow clone for speed; force the auth token so push
+          # works.
+          MARKER_CLONE=$(mktemp -d)
+          gh repo clone "${{ github.repository }}" "$MARKER_CLONE" -- \
+            --depth 1 --branch "$DEFAULT_BRANCH" --no-tags
+          cd "$MARKER_CLONE"
           git config user.name "session-orchestrator[bot]"
           git config user.email "session-orchestrator@noreply.anthropic.com"
-          # Globs may match nothing — || true to keep the step from failing
-          # in that case (well-formed scenario when nothing changed).
-          git add .session-orchestrator/phase-*.started .session-orchestrator/phase-*.failed 2>/dev/null || true
+          mkdir -p .session-orchestrator
+          cp "$MARKER_BUNDLE/.session-orchestrator/"* .session-orchestrator/
+          # Stage only matching files (idempotent — `git add <file>` on
+          # something already-tracked-and-unchanged is a no-op).
+          for m in "${MARKERS[@]}"; do
+            git add ".session-orchestrator/$(basename "$m")"
+          done
           if git diff --cached --quiet; then
-            echo "No marker changes to commit."
+            echo "No marker changes to commit (all files match default branch already)."
           else
             git commit -m "orchestrator: markers for phase ${{ steps.next.outputs.phase }} (run #${{ github.run_id }})"
-            git push origin "HEAD:${{ github.ref_name }}"
+            git push origin "HEAD:${DEFAULT_BRANCH}"
           fi
 
       - name: Post digest comment to tracking issue
