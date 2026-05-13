@@ -231,12 +231,18 @@ jobs:
 
           # Fresh clone of the default branch into a side dir — guaranteed
           # clean even if the session moved HEAD or accumulated working-tree
-          # changes. Shallow clone for speed; force the auth token so push
-          # works.
+          # changes. Shallow clone for speed.
           MARKER_CLONE=$(mktemp -d)
           gh repo clone "${{ github.repository }}" "$MARKER_CLONE" -- \
             --depth 1 --branch "$DEFAULT_BRANCH" --no-tags
           cd "$MARKER_CLONE"
+          # Wire gh as a git credential helper so the marker push below
+          # inherits GH_TOKEN. `gh repo clone` uses gh's API auth for the
+          # initial fetch but leaves `origin` as a credential-less HTTPS URL;
+          # `git push` would then fail with "could not read Username" in the
+          # non-interactive runner shell. Day-2 trap caught by sandbox smoke
+          # Scenario 2 — workflow-R1/R2/R3 codex never ran a live fire.
+          gh auth setup-git
           git config user.name "session-orchestrator[bot]"
           git config user.email "session-orchestrator@noreply.anthropic.com"
           mkdir -p .session-orchestrator
