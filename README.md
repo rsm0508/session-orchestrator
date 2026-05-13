@@ -2,7 +2,7 @@
 
 Autonomous session-orchestration layer that fires fresh Claude Code sessions to advance multi-phase projects between phases — no human between each phase.
 
-**Status:** v0.1.0. CLI, headless Claude invocation, reusable GHA workflow, and sandbox-smoke gate all shipped. First real consumer (ai-viz) wired post-tag.
+**Status:** v0.2.0. CLI, headless Claude invocation, reusable GHA workflow, sandbox-smoke gate, Slack E2E, and Linear-label kill-switch GHA wiring all shipped. First real consumer (Rankwize Cockpit) wires in a dedicated session.
 
 ## The problem
 
@@ -136,7 +136,7 @@ The three paths are checked **in parallel**; **any single active source halts a 
 
 1. **File** (`<consumer>/.session-orchestrator-paused`) — most common; survives across runs because it's in git. Run `session-orchestrator resume` locally + commit the deletion, or `gh api -X DELETE repos/<owner>/<repo>/contents/.session-orchestrator-paused`.
 2. **Env var** (`SESSION_ORCHESTRATOR_PAUSED=true`) — for GHA runs, set a repo or org **Action Variable** of that name (Settings → Secrets and variables → Actions → Variables). The reusable workflow propagates `vars.SESSION_ORCHESTRATOR_PAUSED` into the resolver process. For local CLI runs, plain `process.env`.
-3. **Linear label** (`orchestrator-paused` on any open ticket in `linear_team`) — the lib seam exists (`checkLinearLabel` callback in `kill-switch.ts`) but **no caller attaches one in v0.1.0** — neither the local CLI commands (`next`, `run`, `status`) nor the reusable workflow. The label is therefore a no-op in v0.1.0; full wiring is v0.2 work (see `docs/handoffs/day-3-kickoff.md` P3.11).
+3. **Linear label** (`orchestrator-paused` on any open ticket in `linear_team`) — wired in v0.2. The CLI commands (`next`, `run`, `status`) and the reusable workflow now attach a Linear API checker when **both** `LINEAR_API_KEY` is set in the environment AND `linear_team` is configured. The checker queries Linear for any non-completed issue in that team carrying the `orchestrator-paused` label; finding one halts the run. Missing key, missing team, or API error: no-op (the path returns inactive, the other two paths still work).
 
 ### GHA `403` / "could not read Username" on marker push
 

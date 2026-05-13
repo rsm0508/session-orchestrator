@@ -4,6 +4,7 @@ import { Command, Flags } from '@oclif/core';
 import { loadConfig, ConfigError } from '../lib/config.js';
 import { failedMarkerRelativePath, handoffPathFor, startedMarkerRelativePath, } from '../lib/phase-resolver.js';
 import { checkKillSwitch } from '../lib/kill-switch.js';
+import { maybeCreateLinearPauseChecker } from '../lib/linear-pause-check.js';
 import { resolveRepoRoot } from '../lib/repo.js';
 import { fireHeadlessSession } from '../lib/headless-claude.js';
 export default class Run extends Command {
@@ -88,7 +89,10 @@ export default class Run extends Command {
                 'To retry, delete BOTH markers. To mark phase done without retrying, ' +
                 `delete just ${failedRel} (keeping ${startedRel} as audit trail).`, { exit: 2 });
         }
-        const kill = await checkKillSwitch({ repoRoot });
+        const kill = await checkKillSwitch({
+            repoRoot,
+            checkLinearLabel: maybeCreateLinearPauseChecker(config),
+        });
         if (kill.active) {
             this.error(`Cannot fire: ${kill.details}`, { exit: 3 });
         }

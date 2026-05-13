@@ -128,7 +128,7 @@ After Q1-Q5 are answered:
 8. `npm audit` — try `npm install --save-dev vitest@latest` and re-run tests. If still flagged, escalate. (Q5: deferred to v0.2)
 9. ~~`actions/*` SHA pins~~ — shipped in v0.1.0 (Q5).
 10. `actionlint` CI step — install the binary in a new `.github/workflows/lint-workflows.yml`. (Q5: deferred to v0.2)
-11. **Wire Linear-label kill-switch in GHA runtime** — the lib seam (`checkLinearLabel` callback) exists but `next.ts` never attaches one. v0.1.0 README documents this as "local-CLI-only" pending v0.2 wiring. Caught by codex day-3-p1-R1 [P2]. Plan: add `LINEAR_API_KEY` + `linear_team` reads to `next.ts`, implement the API check, gate behind config presence.
+11. ~~Wire Linear-label kill-switch in GHA runtime~~ — **shipped in v0.2** (see `src/lib/linear-pause-check.ts`). CLI commands (`next`, `run`, `status`) attach a Linear API checker when both `LINEAR_API_KEY` is set AND `linear_team` is configured. Reusable workflow propagates `LINEAR_API_KEY` into the resolver step.
 
 ### Cleanup (small, opportunistic)
 

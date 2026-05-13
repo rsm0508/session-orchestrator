@@ -2,6 +2,7 @@ import { Command, Flags } from '@oclif/core';
 import { loadConfig, ConfigError } from '../lib/config.js';
 import { scanPhases } from '../lib/phase-resolver.js';
 import { checkKillSwitch } from '../lib/kill-switch.js';
+import { maybeCreateLinearPauseChecker } from '../lib/linear-pause-check.js';
 import { resolveRepoRoot } from '../lib/repo.js';
 export default class Status extends Command {
     static description = 'Report current orchestrator state: kill switches + per-phase status.';
@@ -31,7 +32,10 @@ export default class Status extends Command {
             this.log(`linear_team:    ${config.linear_team}`);
         }
         this.log('');
-        const kill = await checkKillSwitch({ repoRoot });
+        const kill = await checkKillSwitch({
+            repoRoot,
+            checkLinearLabel: maybeCreateLinearPauseChecker(config),
+        });
         if (kill.active) {
             this.log(`kill-switch:    ACTIVE — ${kill.details}`);
         }

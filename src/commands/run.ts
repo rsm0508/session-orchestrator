@@ -8,6 +8,7 @@ import {
   startedMarkerRelativePath,
 } from '../lib/phase-resolver.js';
 import { checkKillSwitch } from '../lib/kill-switch.js';
+import { maybeCreateLinearPauseChecker } from '../lib/linear-pause-check.js';
 import { resolveRepoRoot } from '../lib/repo.js';
 import { fireHeadlessSession } from '../lib/headless-claude.js';
 
@@ -101,7 +102,10 @@ export default class Run extends Command {
       );
     }
 
-    const kill = await checkKillSwitch({ repoRoot });
+    const kill = await checkKillSwitch({
+      repoRoot,
+      checkLinearLabel: maybeCreateLinearPauseChecker(config),
+    });
     if (kill.active) {
       this.error(`Cannot fire: ${kill.details}`, { exit: 3 });
     }

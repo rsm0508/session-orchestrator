@@ -2,6 +2,7 @@ import { Command, Flags } from '@oclif/core';
 import { loadConfig, ConfigError } from '../lib/config.js';
 import { resolveNextPhase } from '../lib/phase-resolver.js';
 import { checkKillSwitch } from '../lib/kill-switch.js';
+import { maybeCreateLinearPauseChecker } from '../lib/linear-pause-check.js';
 import { resolveRepoRoot } from '../lib/repo.js';
 export default class Next extends Command {
     static description = 'Scan the consumer repo for the next ready phase and report what would happen.';
@@ -36,7 +37,10 @@ export default class Next extends Command {
             }
             throw err;
         }
-        const kill = await checkKillSwitch({ repoRoot });
+        const kill = await checkKillSwitch({
+            repoRoot,
+            checkLinearLabel: maybeCreateLinearPauseChecker(config),
+        });
         if (kill.active) {
             if (flags.json) {
                 this.log(JSON.stringify({ kind: 'kill-switch', sources: kill.sources, details: kill.details }));

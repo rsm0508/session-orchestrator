@@ -123,13 +123,16 @@ jobs:
       - name: Resolve next ready phase
         id: next
         env:
-          # Codex day-3-p1-R1 [P2] fix: the env-var kill-switch path is a
-          # locked Day-1 product decision but the workflow never propagated
-          # repo/org Variables into the resolver process. Setting an Action
-          # Variable `SESSION_ORCHESTRATOR_PAUSED=true` at repo or org level
-          # now halts the run; the kill-switch lib still treats empty / falsy
-          # values as inactive.
+          # Env-var kill switch: setting an Action Variable
+          # `SESSION_ORCHESTRATOR_PAUSED=true` at repo or org level halts the
+          # run. Empty / falsy values are treated as inactive.
           SESSION_ORCHESTRATOR_PAUSED: ${{ vars.SESSION_ORCHESTRATOR_PAUSED }}
+          # Linear-label kill switch (v0.2): when LINEAR_API_KEY is set AND
+          # config has linear_team, `next` queries Linear for any open issue
+          # in that team carrying the `orchestrator-paused` label and halts
+          # the run if found. Missing key or team = no-op (lib seam returns
+          # false gracefully).
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
         run: |
           set -e
           OUTPUT=$(session-orchestrator next --json)
