@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Config } from '../config.js';
-import { renderDigest } from '../digest.js';
+import { chooseFence, renderDigest } from '../digest.js';
 import type { FireResult } from '../headless-claude.js';
 
 const config: Config = {
@@ -104,6 +104,33 @@ describe('renderDigest', () => {
     };
     const md = renderDigest({ result, config, phase: 1 });
     expect(md).toContain('| envelope_parse_error | JSON.parse failed: Unexpected token |');
+  });
+
+  it('escapes session results containing markdown code fences (P3 — Codex R2)', () => {
+    // Coding-session results commonly include triple-backtick code blocks.
+    // The digest's wrapping fence must be longer than any internal run, else
+    // the embedded ``` closes the digest's fence early and the rest of the
+    // comment renders broken.
+    const resultWithCodeBlock = 'Opened PR with:\n```js\nconst x = 1;\n```\nLooks good.';
+    const result: FireResult = {
+      kind: 'success',
+      exitCode: 0,
+      durationMs: 100,
+      envelope: { type: 'result', is_error: false, result: resultWithCodeBlock },
+      logPath: '/x/.session-orchestrator/runs/phase-1-2026.log',
+      startedMarkerPath: '/x/.session-orchestrator/phase-1.started',
+    };
+    const md = renderDigest({ result, config, phase: 1 });
+    expect(md).toContain('````\n' + resultWithCodeBlock); // 4-backtick fence
+    expect(md).toContain(resultWithCodeBlock + '\n````\n'); // matching close
+  });
+
+  it('chooseFence picks 3 backticks for plain text, longer for embedded fences', () => {
+    expect(chooseFence('plain text')).toBe('```');
+    expect(chooseFence('some `inline` code')).toBe('```');
+    expect(chooseFence('embedded ``` triple')).toBe('````');
+    expect(chooseFence('nested ```` quad')).toBe('`````');
+    expect(chooseFence('mix `one` ``two`` ```three```')).toBe('````');
   });
 
   it('clips very long session result text and points to the log', () => {

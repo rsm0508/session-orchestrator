@@ -188,8 +188,9 @@ export default class Run extends Command {
     this.log(`  log:    ${path.relative(repoRoot, result.logPath)}`);
     this.log(`  marker: ${startedRel} (+ ${failedRel})`);
     this.log(
-      'To retry: delete BOTH the .started and .failed markers, then re-run. ' +
-        'To roll back: delete just the .started marker.',
+      `To retry: delete BOTH ${startedRel} and ${failedRel}, then re-run (or wait for the next scheduled fire). ` +
+        `To mark phase done without retrying: delete only ${failedRel} (.started stays as audit trail). ` +
+        'Either way, .failed blocks the orchestrator globally until cleared.',
     );
     this.exit(4);
   }

@@ -30,6 +30,19 @@ function clip(s: string, budget: number): { body: string; clipped: boolean } {
   return { body: s.slice(0, budget), clipped: true };
 }
 
+/**
+ * Pick a fence longer than any backtick run inside `text` so embedded code
+ * blocks (common in coding-session results) don't close the digest's fence
+ * early. GitHub-flavored markdown allows any N≥3 backticks as a fence; the
+ * closing fence must match.
+ */
+export function chooseFence(text: string): string {
+  let longest = 0;
+  const runs = text.match(/`+/g);
+  if (runs) for (const r of runs) longest = Math.max(longest, r.length);
+  return '`'.repeat(Math.max(3, longest + 1));
+}
+
 export function renderDigest(input: DigestInput): string {
   const { result, config, phase, runUrl } = input;
   const isSuccess = result.kind === 'success';
@@ -86,12 +99,16 @@ export function renderDigest(input: DigestInput): string {
       ? (result.envelope.result ?? '(no result text)')
       : (result.envelope?.result ?? '(no envelope result text)');
   const { body: sessionResult, clipped } = clip(sessionResultRaw, SESSION_TAIL_BUDGET);
+  const fence = chooseFence(sessionResult);
   const sessionBlock =
     '<details><summary>session result</summary>\n\n' +
-    '```\n' +
+    fence +
+    '\n' +
     sessionResult +
     (clipped ? `\n\n…(clipped; full text in ${result.logPath})` : '') +
-    '\n```\n\n' +
+    '\n' +
+    fence +
+    '\n\n' +
     '</details>';
 
   let retryBlock = '';

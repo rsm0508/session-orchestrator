@@ -37,4 +37,35 @@ Full review comments:
 
 ## Round status
 
-Round 1 of 3. All 3 findings actionable; addressing in a follow-up commit on top of `19ed464`. Re-running codex Round 2 against the fix commit only if Roman wants a second pass — otherwise close.
+Round 1 of 3. All 3 findings actionable; addressed in commit `e69ed05`.
+
+---
+
+# Codex review — Round 2
+
+- **Target:** `main` (commits `19ed464` + `e69ed05`)
+- **Base:** `050c91c` (Day 1)
+- **Reviewed at:** 2026-05-12
+- **Round:** 2 of 3
+
+The functional headless path is mostly coherent, but the failure recovery output gives an operator instruction that no longer works with the new failed-marker blocking semantics. The digest formatting issue is lower severity but can break observability for common session outputs.
+
+Full review comments:
+
+- [P2] Fix rollback guidance after failed fires — `src/commands/run.ts:190-192`
+  After a failed fire, following this rollback instruction leaves `.failed` in place, and `resolveNextPhase` now treats any `.failed` marker as a global blocker. In that scenario deleting only `.started` does not roll back or unblock anything; the command should match the new retry/mark-done semantics instead of telling operators to remove just `.started`.
+
+  [ACCEPTED] Stale operator-output text from before the R1 P2 readiness fix — I updated `digest.ts` but missed the parallel block in `run.ts`'s terminal log. Both surface to operators; both must match. Rewritten to: "delete BOTH to retry; delete only `.failed` to mark phase done; .failed blocks orchestrator globally until cleared."
+
+- [P3] Fence arbitrary session results safely — `src/lib/digest.ts:89-94`
+  When the Claude result contains a Markdown code block, which is common for coding summaries, this hard-coded triple-backtick fence is closed by the result text and the rest of the digest renders incorrectly in the GitHub comment. Use a dynamically longer fence or another escaping strategy before embedding arbitrary session output.
+
+  [ACCEPTED] Real bug — coding-session results almost always contain embedded triple-backtick blocks ("Opened PR with `js\nconst x = 1;\n`"). Fix: extract `chooseFence(text)` that scans for the longest backtick run and returns a fence one longer (GFM allows any N≥3 backticks as a fence). Two new tests cover the 3+, 4+, 5+ collision cases.
+
+## R2 triage summary
+
+- 1× [P2] — accepted, fixed (operator-output text consistency).
+- 1× [P3] — accepted, fixed (real markdown rendering bug).
+- 0 skipped, 0 deferred.
+
+Round 2 of 3 complete. If Round 3 finds nothing or only `[SKIPPED]`-tier issues, the artifact closes.
