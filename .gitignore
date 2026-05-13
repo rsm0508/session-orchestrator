@@ -1,5 +1,4 @@
 node_modules/
-dist/
 .session-orchestrator/runs/
 .session-orchestrator-paused
 *.log

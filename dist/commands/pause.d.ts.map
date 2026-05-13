@@ -1,0 +1,1 @@
+{"version":3,"file":"pause.d.ts","sourceRoot":"","sources":["../../src/commands/pause.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,OAAO,EAAS,MAAM,aAAa,CAAC;AAI7C,MAAM,CAAC,OAAO,OAAO,KAAM,SAAQ,OAAO;IACxC,MAAM,CAAC,WAAW,SACyF;IAE3G,MAAM,CAAC,QAAQ,WAGb;IAEF,MAAM,CAAC,KAAK;;;MAOV;IAEI,GAAG,IAAI,OAAO,CAAC,IAAI,CAAC;CAS3B"}

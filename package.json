@@ -19,7 +19,6 @@
     ".github/workflows/run-next-phase.yml"
   ],
   "scripts": {
-    "prepare": "npm run build",
     "build": "tsc -p .",
     "test": "vitest run",
     "test:watch": "vitest",
