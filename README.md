@@ -51,6 +51,7 @@ jobs:
     uses: rsm0508/session-orchestrator/.github/workflows/run-next-phase.yml@main
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # required as of v0.3.0 — fired session calls `codex review` per artifact (Working Principle B)
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }} # optional
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} # optional
 ```
