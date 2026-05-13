@@ -1,0 +1,213 @@
+name: Run next phase
+
+# Reusable workflow. Consumer repos call this from their own
+# .github/workflows/orchestrator.yml — see examples/ for the template.
+#
+# Trust boundary: this workflow runs on the CONSUMER's runner with the
+# CONSUMER's GITHUB_TOKEN. It reads .session-orchestrator/config.yml from
+# the consumer repo, scans for the next ready phase, fires the headless
+# Claude Code session, and persists markers + digest comment back to the
+# consumer repo (default branch).
+#
+# Inputs are intentionally NOT taken from PR titles / branch names / commit
+# messages — the only payload the orchestrator passes to Claude is the
+# CONSUMER-authored kickoff doc at docs/handoffs/<pattern>. That removes the
+# obvious prompt-injection surface from event-triggered runs.
+
+on:
+  workflow_call:
+    inputs:
+      orchestrator-ref:
+        description: |
+          Git ref of rsm0508/session-orchestrator to install — tag preferred
+          (e.g. "v0.1.0"), branch ("main") or SHA also valid. Pin to a tag in
+          production so a midnight push doesn't change behavior under you.
+        type: string
+        required: false
+        default: 'main'
+      dry-run:
+        description: |
+          When true, the orchestrator runs `next` then exits without firing.
+          Useful for first-time wiring (verifies checkout, install, config,
+          kill-switch checks) without burning API credit. Default false.
+        type: boolean
+        required: false
+        default: false
+      timeout-minutes:
+        description: 'Wall-clock job timeout. Defaults to 30 minutes.'
+        type: number
+        required: false
+        default: 30
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+      SESSION_ORCHESTRATOR_PAT:
+        required: false # required only if rsm0508/session-orchestrator is private
+      LINEAR_API_KEY:
+        required: false # reserved for the kill-switch Linear-label seam (Day 3)
+      SLACK_WEBHOOK_URL:
+        required: false
+
+permissions:
+  contents: write # marker commits on the consumer's default branch
+  issues: write # digest comment on the configured tracking issue
+  pull-requests: write # the session itself opens PRs; granted at workflow level so the GITHUB_TOKEN inherits it
+
+# Never cancel a fire in flight — the marker is already on disk and a
+# cancellation would leave .started without .failed (the wrapper's pre-fire
+# marker write is the duplicate-fire guard; canceling makes the phase look
+# in-flight forever).
+concurrency:
+  group: session-orchestrator-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  fire:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(inputs.timeout-minutes) }}
+    steps:
+      # TODO(supply-chain): pin actions/* by SHA before production. Using
+      # major tags during Day 2 development for readability. Dependabot or
+      # `gh api repos/actions/checkout/git/refs/tags/v5` can resolve.
+      - name: Checkout consumer repo
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          # GITHUB_TOKEN scoped to the consumer repo — sufficient for
+          # marker commits + digest issue comments + push back to default.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install session-orchestrator CLI
+        env:
+          # Quoted into the npm install URL only when the PAT secret is set
+          # (private rsm0508/session-orchestrator case). Never echoed.
+          SESSION_ORCHESTRATOR_PAT: ${{ secrets.SESSION_ORCHESTRATOR_PAT }}
+          ORCH_REF: ${{ inputs.orchestrator-ref }}
+        run: |
+          set -e
+          if [ -n "$SESSION_ORCHESTRATOR_PAT" ]; then
+            # The PAT is in the URL; don't print the install command itself.
+            set +x
+            npm install -g "git+https://${SESSION_ORCHESTRATOR_PAT}@github.com/rsm0508/session-orchestrator.git#${ORCH_REF}" > /dev/null
+          else
+            npm install -g "github:rsm0508/session-orchestrator#${ORCH_REF}"
+          fi
+          session-orchestrator --version || true
+          claude --version
+
+      - name: Resolve next ready phase
+        id: next
+        run: |
+          set -e
+          OUTPUT=$(session-orchestrator next --json)
+          echo "$OUTPUT"
+          KIND=$(echo "$OUTPUT" | jq -r '.kind')
+          PHASE=$(echo "$OUTPUT" | jq -r '.phase // empty')
+          TRACKING_ISSUE=$(echo "$OUTPUT" | jq -r '.tracking_issue // empty')
+          DETAILS=$(echo "$OUTPUT" | jq -r '.details // empty')
+          {
+            echo "kind=$KIND"
+            echo "phase=$PHASE"
+            echo "tracking_issue=$TRACKING_ISSUE"
+            echo "details=$DETAILS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Report kill-switch active
+        if: ${{ steps.next.outputs.kind == 'kill-switch' }}
+        run: |
+          echo "::notice title=Kill switch active::No phase will fire this tick. Details: ${{ steps.next.outputs.details }}"
+
+      - name: Report not-ready state
+        if: ${{ steps.next.outputs.kind == 'not-ready' }}
+        run: |
+          echo "::notice title=Not ready::${{ steps.next.outputs.details }}"
+
+      - name: Fire the next phase
+        if: ${{ steps.next.outputs.kind == 'ready' }}
+        id: fire
+        # Don't fail the job on exit-4 (FireFailure) — we want the
+        # marker-commit + digest-comment + Slack steps to all run regardless.
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -e
+          PHASE='${{ steps.next.outputs.phase }}'
+          if [ '${{ inputs.dry-run }}' = 'true' ]; then
+            session-orchestrator run --phase "$PHASE" --dry-run
+          else
+            session-orchestrator run --phase "$PHASE"
+          fi
+
+      # R3 [P1] acceptance criterion: failure markers must be durable across
+      # workflow runs, else a failed phase silently re-fires next tick.
+      # We commit ONLY phase-*.{started,failed} (never the runs/ subdir).
+      - name: Commit + push markers (always, even on failure)
+        if: ${{ always() && steps.next.outputs.kind == 'ready' && inputs.dry-run == false }}
+        run: |
+          set -e
+          git config user.name "session-orchestrator[bot]"
+          git config user.email "session-orchestrator@noreply.anthropic.com"
+          # Globs may match nothing — || true to keep the step from failing
+          # in that case (well-formed scenario when nothing changed).
+          git add .session-orchestrator/phase-*.started .session-orchestrator/phase-*.failed 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No marker changes to commit."
+          else
+            git commit -m "orchestrator: markers for phase ${{ steps.next.outputs.phase }} (run #${{ github.run_id }})"
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi
+
+      - name: Post digest comment to tracking issue
+        if: ${{ always() && steps.next.outputs.kind == 'ready' && steps.next.outputs.tracking_issue != '' && inputs.dry-run == false }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          PHASE='${{ steps.next.outputs.phase }}'
+          ISSUE='${{ steps.next.outputs.tracking_issue }}'
+          # The wrapper writes the digest at .session-orchestrator/runs/phase-N-<iso>.digest.md.
+          DIGEST=$(ls -t .session-orchestrator/runs/phase-${PHASE}-*.digest.md 2>/dev/null | head -1)
+          if [ -z "$DIGEST" ]; then
+            echo "No digest file from this fire — likely a marker-collision or pre-spawn failure."
+            exit 0
+          fi
+          echo "Posting digest from $DIGEST to issue #${ISSUE}"
+          {
+            cat "$DIGEST"
+            echo ""
+            echo "---"
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "Fire outcome: ${{ steps.fire.outcome }}"
+          } > /tmp/digest-with-footer.md
+          gh issue comment "$ISSUE" --repo "${{ github.repository }}" --body-file /tmp/digest-with-footer.md
+
+      - name: Optional Slack notification
+        if: ${{ always() && steps.next.outputs.kind == 'ready' && env.SLACK_WEBHOOK_URL != '' && inputs.dry-run == false }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          set -e
+          PHASE='${{ steps.next.outputs.phase }}'
+          OUTCOME='${{ steps.fire.outcome }}'
+          MARK=$([ "$OUTCOME" = "success" ] && echo "OK" || echo "FAILED")
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          BODY=$(jq -nc \
+            --arg text "session-orchestrator: phase ${PHASE} ${MARK} (${OUTCOME}) — ${RUN_URL}" \
+            '{text: $text}')
+          curl -fsS -X POST -H 'Content-Type: application/json' -d "$BODY" "$SLACK_WEBHOOK_URL"
+
+      - name: Fail the job if the fire failed
+        # Comes after marker-commit + digest + Slack so all observability lands first.
+        if: ${{ steps.next.outputs.kind == 'ready' && steps.fire.outcome == 'failure' && inputs.dry-run == false }}
+        run: |
+          echo "::error title=Phase fire failed::See digest comment on issue #${{ steps.next.outputs.tracking_issue }} for details."
+          exit 1

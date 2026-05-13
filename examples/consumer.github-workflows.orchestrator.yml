@@ -1,0 +1,65 @@
+# session-orchestrator consumer workflow — copy this to your repo as
+# .github/workflows/orchestrator.yml and adapt the trigger config.
+#
+# Prereqs in the consumer repo:
+#   - .session-orchestrator/config.yml (see examples/.session-orchestrator/config.yml)
+#   - Repo secret ANTHROPIC_API_KEY set in Settings → Secrets and variables → Actions.
+#   - If rsm0508/session-orchestrator is private: also set SESSION_ORCHESTRATOR_PAT
+#     (a GitHub PAT with read access to that repo).
+#   - Optional: SLACK_WEBHOOK_URL secret for per-fire Slack pings.
+#
+# Trigger model (locked Day 1 decision):
+#   - Event-driven: every PR merge to the configured feature branch.
+#   - Schedule-based safety net: daily.
+# Either trigger calls the reusable workflow; concurrency: cancel-in-progress: false
+# (set by the reusable workflow itself) prevents two fires racing.
+
+name: Orchestrator
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      # IMPORTANT: must match `feature_branch` in your .session-orchestrator/config.yml.
+      # `feature_branch` is metadata — the workflow runs from the default branch,
+      # but the PR-merge trigger filters on this branch to know when to advance.
+      - feat/mcp-v1
+  schedule:
+    # Daily 09:00 UTC safety net. Adjust to your team's working hours.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    # Manual trigger for ops debugging. Useful when a phase needed manual
+    # marker cleanup and you want to retry without waiting for the next cron.
+    inputs:
+      dry-run:
+        description: 'Dry-run only — report what would happen, do not fire.'
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  fire:
+    # Skip the pull_request: closed runs that were NOT merges (close-without-merge
+    # doesn't mean a phase completed). For schedule/workflow_dispatch this clause
+    # short-circuits to true.
+    if: |
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.merged == true
+
+    uses: rsm0508/session-orchestrator/.github/workflows/run-next-phase.yml@main
+    # Pin to a tag in production: @v0.1.0 etc. `@main` chases the trunk.
+
+    with:
+      # Optional: pin the orchestrator CLI version installed inside the runner.
+      # When omitted, the reusable workflow installs from `main`.
+      orchestrator-ref: main
+      dry-run: ${{ inputs.dry-run || false }}
+
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # Required only if rsm0508/session-orchestrator is private. Drop this
+      # line when the repo goes public.
+      SESSION_ORCHESTRATOR_PAT: ${{ secrets.SESSION_ORCHESTRATOR_PAT }}
+      # Optional.
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
