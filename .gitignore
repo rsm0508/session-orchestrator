@@ -3,6 +3,7 @@ node_modules/
 .session-orchestrator-paused
 *.log
 .codex-review-*.raw
+.codex-output/
 .env
 .env.local
 .DS_Store
