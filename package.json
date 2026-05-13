@@ -1,0 +1,51 @@
+{
+  "name": "session-orchestrator",
+  "version": "0.1.0-pre",
+  "description": "Autonomous session-orchestration layer that fires fresh Claude Code sessions to advance multi-phase projects between phases.",
+  "license": "MIT",
+  "author": "Roman <roman@fullsession.io>",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "session-orchestrator": "./bin/run.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "examples",
+    "templates",
+    ".github/workflows/run-next-phase.yml"
+  ],
+  "scripts": {
+    "prepare": "npm run build",
+    "build": "tsc -p .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "prettier --check .",
+    "format": "prettier --write ."
+  },
+  "oclif": {
+    "bin": "session-orchestrator",
+    "commands": "./dist/commands",
+    "plugins": [
+      "@oclif/plugin-help"
+    ]
+  },
+  "dependencies": {
+    "@oclif/core": "^4.0.0",
+    "@oclif/plugin-help": "^6.2.0",
+    "execa": "^9.5.0",
+    "js-yaml": "^4.1.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.0",
+    "prettier": "^3.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,0 +1,30 @@
+# session-orchestrator consumer config (lives at <repo>/.session-orchestrator/config.yml)
+# Drop this file into any repo that wants the orchestrator to advance its phases automatically.
+
+# Human-readable label used in run logs + digest comments.
+project_name: "MCP v1.0"
+
+# Long-lived feature branch the orchestrator pushes phase work onto.
+# Each phase is a sub-PR off this branch, NOT off master.
+feature_branch: "feat/mcp-v1"
+
+# Where phase kickoff handoff docs live. {N} is the 1-indexed phase number.
+# The orchestrator scans for the highest N with a matching file, then checks
+# whether .session-orchestrator/phase-N.started exists — if missing, that phase is "ready".
+handoff_pattern: "docs/handoffs/mcp-phase-{N}-kickoff.md"
+
+# Phase numbers run 1..max_phase. Past max_phase, the orchestrator reports "project done"
+# and stops trying to fire new phases.
+max_phase: 4
+
+# Optional. When set, the orchestrator can transition tickets on phase start/finish.
+# Linear's team prefix (e.g., "RAN" for the ai-viz Rankwize team).
+linear_team: "RAN"
+
+# Optional. Override the Claude Code model the headless session runs.
+# Defaults to claude-opus-4-7. Use claude-sonnet-4-6 for cheaper runs on lower-stakes work.
+claude_model: "claude-opus-4-7"
+
+# GitHub issue number on the CONSUMER repo where run digest comments get posted.
+# The orchestrator never opens new issues — it appends to this one.
+tracking_issue: 1
