@@ -151,13 +151,21 @@ jobs:
           # session fail unauthenticated.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Codex workflow-R2 [P1] fix: leave a cleanup budget for the
-          # always-run marker/digest steps. Pass an inner timeout 5 minutes
-          # SHORTER than the job's wall-clock cap so a long session can't
-          # consume the entire budget and starve cleanup.
-          SESSION_ORCHESTRATOR_TIMEOUT_MS: ${{ (fromJSON(inputs.timeout-minutes) - 5) * 60 * 1000 }}
+          # Codex workflow-R2 [P1] + R3 [P1] fix: leave a cleanup budget for
+          # the always-run marker/digest steps. The wrapper-internal timeout
+          # is computed in shell (GHA expressions don't support arithmetic
+          # operators — `${{ (x - 5) * 60 * 1000 }}` is a parse error). Pass
+          # the raw minutes; subtract 5 (cleanup buffer) and convert to ms
+          # inside the run block.
+          TIMEOUT_MINUTES_RAW: ${{ inputs.timeout-minutes }}
         run: |
           set -e
+          # Reserve 5-minute cleanup buffer; never go below 60s.
+          BUFFER_MIN=5
+          INNER_MIN=$(( TIMEOUT_MINUTES_RAW - BUFFER_MIN ))
+          if [ "$INNER_MIN" -lt 1 ]; then INNER_MIN=1; fi
+          export SESSION_ORCHESTRATOR_TIMEOUT_MS=$(( INNER_MIN * 60 * 1000 ))
+          echo "Wrapper timeout: ${INNER_MIN}m (${SESSION_ORCHESTRATOR_TIMEOUT_MS}ms); job timeout: ${TIMEOUT_MINUTES_RAW}m"
           PHASE='${{ steps.next.outputs.phase }}'
           if [ '${{ inputs.dry-run }}' = 'true' ]; then
             session-orchestrator run --phase "$PHASE" --dry-run
@@ -249,11 +257,21 @@ jobs:
           gh issue comment "$ISSUE" --repo "${{ github.repository }}" --body-file /tmp/digest-with-footer.md
 
       - name: Optional Slack notification
-        if: ${{ always() && steps.next.outputs.kind == 'ready' && env.SLACK_WEBHOOK_URL != '' && inputs.dry-run == false }}
+        # Codex workflow-R3 [P3] fix: step-level `env:` is NOT available in
+        # the same step's `if:` expression, so the previous form
+        # `if: ... env.SLACK_WEBHOOK_URL != ''` was always false → Slack
+        # never fired. Move the secret-presence check into the run block
+        # itself and short-circuit there. The step's `if` is now scoped
+        # only to "should this notification stage run at all?"
+        if: ${{ always() && steps.next.outputs.kind == 'ready' && inputs.dry-run == false }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           set -e
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL not configured; skipping Slack notification."
+            exit 0
+          fi
           PHASE='${{ steps.next.outputs.phase }}'
           OUTCOME='${{ steps.fire.outcome }}'
           MARK=$([ "$OUTCOME" = "success" ] && echo "OK" || echo "FAILED")
