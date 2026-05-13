@@ -77,6 +77,7 @@ Required keys: `project_name`, `feature_branch`, `handoff_pattern` (must contain
 
 - `allowed_tools` is passed verbatim to `claude --allowedTools` — space-separated tool names. NEVER include `AskUserQuestion` (orchestrator refuses to start). Typical: `"Read Write Edit Bash Glob Grep"`.
 - `max_budget_usd` is the hard $ cap per fire (`claude --max-budget-usd`). Working Principle A guardrail — required, no default.
+- `feature_branch` is **PR-target metadata, not a fire-from-this-branch signal.** The orchestrator runs from the consumer's default branch (so marker commits land there); the session itself creates phase-specific branches off the default branch per its kickoff doc, opens PRs targeting `feature_branch`. See CLAUDE.md's "`feature_branch` semantics" section for the full rationale.
 
 Optional: `linear_team`, `claude_model` (default `claude-opus-4-7`).
 

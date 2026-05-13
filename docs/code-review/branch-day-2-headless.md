@@ -68,4 +68,46 @@ Full review comments:
 - 1× [P3] — accepted, fixed (real markdown rendering bug).
 - 0 skipped, 0 deferred.
 
-Round 2 of 3 complete. If Round 3 finds nothing or only `[SKIPPED]`-tier issues, the artifact closes.
+Round 2 of 3 complete. R3 follows.
+
+---
+
+# Codex review — Round 3 (final)
+
+- **Target:** `main` (commits `19ed464` + `e69ed05` + `b19eb38`)
+- **Base:** `050c91c` (Day 1)
+- **Reviewed at:** 2026-05-12
+- **Round:** 3 of 3 (cap)
+
+The headless run path can lose failure markers in CI and can execute on the wrong branch despite the configured feature branch. These affect the orchestrator's core safety guarantees.
+
+Full review comments:
+
+- [P1] Persist failed markers before exiting CI — `src/lib/headless-claude.ts:267-271`
+  When a headless run fails in the GitHub Actions use case, this writes `phase-N.failed` only in the ephemeral runner checkout and `run.ts` exits with failure immediately afterward. The next scheduled/PR-triggered run will check out a clean copy without that marker, so `resolveNextPhase` can see the same phase as ready and refire it, potentially burning budget repeatedly. Make failure markers durable before returning failure, either in this command or in an `always()` workflow step that commits/pushes them.
+
+  [ACCEPTED — deferred to task #4 (GHA workflow), with explicit acceptance criterion]. This is a real correctness issue at the orchestrator/CI seam, but the durability layer correctly lives in the GHA workflow (commit + push markers under `always()`), not in the CLI wrapper. The wrapper writing to the consumer's git on its own would be a layering violation (CLI tools shouldn't auto-commit). Two follow-ups land alongside this triage:
+  - **CLAUDE.md** gains a "Marker durability in CI" section documenting the workflow's commit-on-`always()` responsibility as a hard contract.
+  - **Task #4's acceptance criteria** explicitly require the workflow to commit AND push `.session-orchestrator/phase-*.{started,failed}` files (and ONLY those — never the `runs/` subdir) under an `if: always()` step, regardless of session exit code.
+
+- [P1] Check out configured branch before firing — `src/commands/run.ts:138-142`
+  When this command is invoked from a checkout that is not `config.feature_branch`—for example a scheduled GitHub Actions run on the default branch—the code only logs the configured branch and then starts Claude in the current `repoRoot`. The session's commits and markers will be made on whatever branch is checked out, so the configured feature branch is ignored and phase work can land on the wrong branch. Validate or check out `config.feature_branch` before spawning Claude.
+
+  [SKIPPED — architecture clarification: `feature_branch` is PR-target metadata, not a fire-from-this-branch signal]. Reading `config.feature_branch` as "the branch to check out before firing" inverts the design:
+  - **Marker commits** are an orchestrator audit trail that must live on the consumer's default branch (so the next workflow tick can see them). If the orchestrator pre-checked-out `feature_branch`, markers would land there and be invisible to subsequent runs.
+  - **Session code commits** are NOT made on `feature_branch` either. Per the design, the kickoff handoff doc instructs Claude to create a phase-specific branch off main (e.g. `feat/mcp-v1-phase-3`), commit, push, open a PR targeting `feature_branch`. The session does its own branch creation/checkout; that's the kickoff's job, not the orchestrator's.
+  - `feature_branch` in the config is the **PR target** the session aims at — used by the workflow's `pull_request: closed` trigger to decide which merges should advance the phase, and surfaced in the digest for human readers.
+
+  Two clarifying doc updates land alongside this triage so future readers don't hit the same interpretation:
+  - **CLAUDE.md** gains an explicit "`feature_branch` semantics" subsection.
+  - **README's Configuration section** clarifies "feature_branch = PR target metadata; the orchestrator intentionally runs from the default branch".
+
+## R3 triage summary
+
+- 1× [P1] — accepted, deferred to task #4 with explicit acceptance criterion.
+- 1× [P1] — skipped, with architecture clarification + doc updates.
+- 0 rolled over to a future round (Round 3 was the cap).
+
+## Round 3 status: artifact CLOSED
+
+3-round cap reached. No findings roll forward to a tracking doc. Both R3 issues are addressed (deferred-with-criterion or clarified-by-design). Day 2 GHA workflow work resumes; the deferred [P1] is a hard gate on task #4.

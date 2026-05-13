@@ -57,6 +57,32 @@ When in doubt about the protocol, the ai-viz skill file is authoritative — def
 - `src/lib/headless-claude.ts` — the execa wrapper. Pre-fires `.started` marker atomically (exclusive create — duplicate-fire guard), spawns `claude -p --bare ...`, captures stdout/stderr to a log, parses the JSON envelope, writes `.failed` on any failure path, persists `*.result.json` + `*.digest.md` alongside the log for the GHA workflow to consume.
 - `src/lib/digest.ts` — pure `FireResult → markdown` renderer for the tracking-issue digest comment.
 
+### `feature_branch` semantics (read this before touching the readiness rule or the workflow)
+
+`config.feature_branch` is **PR-target metadata**, not a "fire from this branch" signal. The orchestrator deliberately runs from the consumer's default branch (usually `main`):
+
+- **Marker commits** (`.session-orchestrator/phase-*.{started,failed}`) are an orchestrator audit trail. They must live on the default branch so the next workflow tick — which checks out the default branch — can see them. If we pre-checked-out `feature_branch` before firing, markers would land there and be invisible to subsequent runs.
+- **Session code commits** are NOT made on `feature_branch` either. The kickoff handoff doc instructs Claude to create a phase-specific branch off `main` (e.g. `feat/mcp-v1-phase-3`), commit there, push, open a PR targeting `feature_branch`. The session does its own branch creation/checkout — that's the kickoff's job, not the orchestrator's.
+- `feature_branch` is what the **consumer workflow's `pull_request: closed` trigger** filters on — i.e. "advance the orchestrator when a phase PR merges into `feature_branch`".
+
+This was clarified in response to a Codex R3 [SKIPPED] finding. If a future reviewer flags "the orchestrator doesn't checkout config.feature_branch", point them here.
+
+### Marker durability in CI (hard contract with the reusable workflow)
+
+The CLI writes `.session-orchestrator/phase-N.{started,failed}` to the runner's local filesystem. The runner is **ephemeral** — those files vanish at job end unless committed. The reusable workflow at `.github/workflows/run-next-phase.yml` MUST commit and push any new/modified markers under an `if: always()` step (regardless of session exit code) before the job ends. Otherwise:
+
+- A failed fire writes `.failed`, exits 4. The marker is GONE on the next run's fresh checkout. `resolveNextPhase` re-marks the same phase as ready and refires it → budget burn until manually paused.
+- A successful fire writes `.started`. Same loss → next run sees no marker → fires phase 1 again, burning budget AND clobbering the prior session's work.
+
+The contract:
+
+- Workflow MUST `git add .session-orchestrator/phase-*.started .session-orchestrator/phase-*.failed` under `if: always()`.
+- Workflow MUST `git commit` only when there are staged changes (use `git diff --cached --quiet || git commit ...`).
+- Workflow MUST `git push` to the consumer's default branch.
+- Workflow MUST NOT commit `.session-orchestrator/runs/` (those are gitignored on the consumer side too).
+
+This was surfaced by Codex R3 [P1] and is a hard acceptance criterion for the workflow task.
+
 **Marker convention** (`.session-orchestrator/`):
 
 | File                             | Written by                | Meaning                                                                          |
