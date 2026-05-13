@@ -3,12 +3,13 @@ import path from 'node:path';
 import { Command, Flags } from '@oclif/core';
 import { loadConfig, ConfigError } from '../lib/config.js';
 import {
+  failedMarkerRelativePath,
   handoffPathFor,
   startedMarkerRelativePath,
-  MARKERS_DIR,
 } from '../lib/phase-resolver.js';
 import { checkKillSwitch } from '../lib/kill-switch.js';
 import { resolveRepoRoot } from '../lib/repo.js';
+import { fireHeadlessSession } from '../lib/headless-claude.js';
 
 export default class Run extends Command {
   static description = 'Fire a specific phase by number (manual override).';
@@ -51,9 +52,10 @@ export default class Run extends Command {
     }
 
     const handoffRel = handoffPathFor(config, flags.phase);
-    const markerRel = startedMarkerRelativePath(flags.phase);
+    const startedRel = startedMarkerRelativePath(flags.phase);
+    const failedRel = failedMarkerRelativePath(flags.phase);
     const handoffAbs = path.join(repoRoot, handoffRel);
-    const markerAbs = path.join(repoRoot, markerRel);
+    const startedAbs = path.join(repoRoot, startedRel);
 
     let handoffExists = true;
     try {
@@ -70,7 +72,7 @@ export default class Run extends Command {
 
     let markerExists = false;
     try {
-      await fs.access(markerAbs);
+      await fs.access(startedAbs);
       markerExists = true;
     } catch {
       // expected
@@ -78,8 +80,8 @@ export default class Run extends Command {
 
     if (markerExists) {
       this.error(
-        `Phase ${flags.phase} already has a started-marker at ${markerRel}. ` +
-          'Delete it to allow re-firing (intentional friction — see README).',
+        `Phase ${flags.phase} already has a started-marker at ${startedRel}. ` +
+          'Delete it (and any .failed sibling) to allow re-firing — intentional friction (see README).',
         { exit: 2 },
       );
     }
@@ -90,36 +92,77 @@ export default class Run extends Command {
     }
 
     this.log(`[fire] phase ${flags.phase} of project "${config.project_name}"`);
-    this.log(`  kickoff: ${handoffRel}`);
-    this.log(`  marker:  ${markerRel}`);
-    this.log(`  model:   ${config.claude_model}`);
-    this.log(`  branch:  ${config.feature_branch}`);
+    this.log(`  kickoff:        ${handoffRel}`);
+    this.log(`  marker:         ${startedRel}`);
+    this.log(`  model:          ${config.claude_model}`);
+    this.log(`  branch:         ${config.feature_branch}`);
+    this.log(`  allowed_tools:  ${config.allowed_tools}`);
+    this.log(`  max_budget_usd: $${config.max_budget_usd}`);
 
     if (flags['dry-run']) {
       this.log('--dry-run: not writing marker, not invoking claude.');
       this.exit(0);
     }
 
-    // Day 1 v0.1.0-pre: the headless Claude Code invocation is NOT yet wired.
-    // Writing the started-marker without firing the session would leave the
-    // consumer repo claiming "phase started" when no session actually ran —
-    // worse than not running at all. So `run` without --dry-run hard-fails
-    // here until Day 2 lands. The marker write is the LAST step before the
-    // execa-to-`claude --print` call so the two land atomically in Day 2.
-    this.error(
-      'Headless Claude invocation not yet wired (Day 2 scope). ' +
-        'Re-run with --dry-run to verify config + kill-switch + phase resolution. ' +
-        'See docs/handoffs/day-2-kickoff.md.',
-      { exit: 4 },
-    );
+    // --bare mode requires ANTHROPIC_API_KEY (or apiKeyHelper via --settings).
+    // Without it the headless session returns "Not logged in" and burns ~$0
+    // but wastes the runner's time. Hard-fail upfront with a clear pointer.
+    if (!process.env.ANTHROPIC_API_KEY) {
+      this.error(
+        'ANTHROPIC_API_KEY env var is not set. The headless `claude --bare` ' +
+          'invocation requires it (OAuth and keychain are NOT read in --bare mode). ' +
+          'In GitHub Actions, pass it via `env: { ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }} }`.',
+        { exit: 2 },
+      );
+    }
 
-    // Day 2 will replace the error above with the following sequence:
-    //   1. Read handoff doc contents
-    //   2. Ensure MARKERS_DIR exists in repo
-    //   3. Write marker file (atomic precondition for the fire)
-    //   4. execa('claude', ['--print', handoffContent], { cwd: repoRoot, stdio: ['inherit', 'pipe', 'pipe'] })
-    //   5. Persist run log + post digest comment
-    // The MARKERS_DIR import above is kept to avoid an unused-import warning later.
-    void MARKERS_DIR;
+    const kickoffContent = await fs.readFile(handoffAbs, 'utf8');
+
+    this.log('[fire] invoking claude (headless)…');
+
+    const result = await fireHeadlessSession({
+      repoRoot,
+      phase: flags.phase,
+      config,
+      kickoffContent,
+    });
+
+    if (result.kind === 'success') {
+      this.log(
+        `[fire] OK — exit 0, duration ${result.durationMs}ms, ` +
+          `turns=${result.envelope.num_turns ?? '?'}, cost=$${(
+            result.envelope.total_cost_usd ?? 0
+          ).toFixed(4)}`,
+      );
+      this.log(`  log:    ${path.relative(repoRoot, result.logPath)}`);
+      this.log(`  marker: ${startedRel}`);
+      this.exit(0);
+    }
+
+    // failure path — .failed marker has already been written by the wrapper.
+    this.log(`[fire] FAILED reason=${result.reason} exit=${result.exitCode}`);
+    if (result.envelope) {
+      this.log(`  envelope.subtype:    ${result.envelope.subtype ?? '(none)'}`);
+      this.log(`  envelope.is_error:   ${result.envelope.is_error}`);
+      if (result.envelope.result) {
+        this.log(`  envelope.result:     ${result.envelope.result.slice(0, 200)}`);
+      }
+      if (result.envelope.errors?.length) {
+        this.log(`  envelope.errors:     ${result.envelope.errors.join('; ')}`);
+      }
+    }
+    if (result.envelopeParseError) {
+      this.log(`  envelope_parse_err:  ${result.envelopeParseError}`);
+    }
+    if (result.spawnError) {
+      this.log(`  spawn_error:         ${result.spawnError}`);
+    }
+    this.log(`  log:    ${path.relative(repoRoot, result.logPath)}`);
+    this.log(`  marker: ${startedRel} (+ ${failedRel})`);
+    this.log(
+      'To retry: delete BOTH the .started and .failed markers, then re-run. ' +
+        'To roll back: delete just the .started marker.',
+    );
+    this.exit(4);
   }
 }

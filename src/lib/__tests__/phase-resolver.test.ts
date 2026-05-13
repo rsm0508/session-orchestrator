@@ -17,6 +17,8 @@ const baseConfig: Config = {
   max_phase: 4,
   tracking_issue: 1,
   claude_model: 'claude-opus-4-7',
+  allowed_tools: 'Read Write Edit Bash Glob Grep',
+  max_budget_usd: 5.0,
 };
 
 let tmpRoot: string;

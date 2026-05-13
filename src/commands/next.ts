@@ -22,6 +22,11 @@ export default class Next extends Command {
       description: 'Report only; never write markers or fire sessions.',
       default: false,
     }),
+    json: Flags.boolean({
+      description:
+        'Emit a single-line JSON status object (for CI consumption). Suppresses text output.',
+      default: false,
+    }),
   };
 
   async run(): Promise<void> {
@@ -40,6 +45,12 @@ export default class Next extends Command {
 
     const kill = await checkKillSwitch({ repoRoot });
     if (kill.active) {
+      if (flags.json) {
+        this.log(
+          JSON.stringify({ kind: 'kill-switch', sources: kill.sources, details: kill.details }),
+        );
+        this.exit(0);
+      }
       this.log(`[kill-switch] ${kill.details}`);
       this.log('No phase will fire while a kill switch is active.');
       this.exit(0);
@@ -48,12 +59,32 @@ export default class Next extends Command {
     const next = await resolveNextPhase(repoRoot, config);
 
     if (next.kind === 'not-ready') {
+      if (flags.json) {
+        this.log(JSON.stringify({ kind: 'not-ready', reason: next.reason, details: next.details }));
+        this.exit(0);
+      }
       this.log(`[not-ready] ${next.reason}: ${next.details}`);
       for (const status of next.scanned) {
         const handoff = status.handoffExists ? 'handoff:yes' : 'handoff:no ';
         const marker = status.startedMarkerExists ? 'started:yes' : 'started:no ';
         this.log(`  phase ${status.phase}  ${handoff}  ${marker}  ${status.handoffPath}`);
       }
+      this.exit(0);
+    }
+
+    if (flags.json) {
+      this.log(
+        JSON.stringify({
+          kind: 'ready',
+          phase: next.phase,
+          handoff: next.handoffPath,
+          startedMarker: next.startedMarkerPath,
+          project: config.project_name,
+          feature_branch: config.feature_branch,
+          model: config.claude_model,
+          tracking_issue: config.tracking_issue,
+        }),
+      );
       this.exit(0);
     }
 
@@ -68,14 +99,11 @@ export default class Next extends Command {
       this.exit(0);
     }
 
-    // Day 1 scope: this command intentionally does NOT fire the session.
-    // Use `session-orchestrator run --phase N` to fire (Day 2 will wire the
-    // headless invocation; today, even that command refuses to fire to avoid
-    // leaving a started-marker without a session).
+    // `next` reports only. Firing is `run --phase N` — keeping the two as
+    // separate commands keeps `next` cheap to call from a cron without ever
+    // accidentally writing a marker or invoking the model.
     this.log(
-      'Note: `next` reports only. To fire, use `session-orchestrator run --phase ' +
-        next.phase +
-        '`. Headless invocation lands in Day 2 (see docs/handoffs/day-2-kickoff.md).',
+      `Note: \`next\` reports only. To fire, run \`session-orchestrator run --phase ${next.phase}\`.`,
     );
   }
 }

@@ -40,6 +40,10 @@ export function startedMarkerRelativePath(phase: number): string {
   return path.posix.join(MARKERS_DIR, `phase-${phase}.started`);
 }
 
+export function failedMarkerRelativePath(phase: number): string {
+  return path.posix.join(MARKERS_DIR, `phase-${phase}.failed`);
+}
+
 async function pathExists(absolutePath: string): Promise<boolean> {
   try {
     await fs.access(absolutePath);

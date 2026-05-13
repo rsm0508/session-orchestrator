@@ -5,6 +5,8 @@ import { z } from 'zod';
 
 export const CONFIG_RELATIVE_PATH = '.session-orchestrator/config.yml';
 
+export const FORBIDDEN_HEADLESS_TOOLS = ['AskUserQuestion'] as const;
+
 export const ConfigSchema = z
   .object({
     project_name: z.string().min(1, 'project_name is required'),
@@ -19,13 +21,25 @@ export const ConfigSchema = z
     tracking_issue: z.number().int().positive('tracking_issue must be a positive integer'),
     linear_team: z.string().min(1).optional(),
     claude_model: z.string().min(1).default('claude-opus-4-7'),
+    allowed_tools: z
+      .string()
+      .min(1, 'allowed_tools is required (passed verbatim to claude --allowedTools)')
+      .refine((s) => !FORBIDDEN_HEADLESS_TOOLS.some((forbidden) => s.includes(forbidden)), {
+        message: `allowed_tools must not include ${FORBIDDEN_HEADLESS_TOOLS.join(', ')} — these would hang a headless session waiting for operator input`,
+      }),
+    max_budget_usd: z
+      .number()
+      .positive('max_budget_usd must be a positive number (hard $ cap per phase fire)'),
   })
   .strict();
 
 export type Config = z.infer<typeof ConfigSchema>;
 
 export class ConfigError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
     this.name = 'ConfigError';
   }
