@@ -159,12 +159,14 @@ GIT_CONFIG_VALUE_0="C:/Users/roman/Documents/____FS/Projects/session-orchestrato
 
 ## Acceptance for Day 3 close
 
-- [ ] Q1-Q5 answered + locked in this doc or in a decisions file.
-- [ ] All P1 items shipped + codex-reviewed.
-- [ ] v0.1.0 tag exists on `rsm0508/session-orchestrator`.
-- [ ] ai-viz wiring PR open + at least one successful dry-run.
-- [ ] `project_day_3.md` written to auto-memory at close.
-- [ ] `MEMORY.md` index entry for `project_day_3.md`.
+- [x] Q1-Q5 answered + locked in this doc (see top decisions table).
+- [x] All P1 items shipped + codex-reviewed (R1+R2, see `docs/code-review/branch-day-3-p1.md`).
+- [x] v0.1.0 tag exists on `rsm0508/session-orchestrator` (commit `dbbff95`, pushed).
+- [x] Slack webhook E2E verified end-to-end on sandbox (Q3 follow-through; webhook rotated post-verification because the URL surfaced in the working transcript).
+- [x] Sandbox repo reset per Q4 (PRs closed, branches deleted, markers cleared, orchestrator.yml pinned to `@v0.1.0`).
+- [~] ai-viz wiring — **DEFERRED to a dedicated session.** Roman's call: first real consumer will be a new **Rankwize Cockpit** project (internal PM/CS dashboard — LLM-usage tracking by run type, usage-trend reports, user feedback + feature requests, critical-warning email routing to Roman/Bilal). The cockpit lives on `feat/cockpit` (worktree-isolated from MCP work). Its first phase-1-kickoff handoff doc is produced by a vision-round in a separate session, not in Day-3 close. Orchestrator wiring lands when that kickoff exists.
+- [x] `project_day_3.md` written to auto-memory at close.
+- [x] `MEMORY.md` index entry for `project_day_3.md`.
 
 ---
 
