@@ -10,6 +10,8 @@ export interface PhaseStatus {
   handoffExists: boolean;
   startedMarkerPath: string;
   startedMarkerExists: boolean;
+  failedMarkerPath: string;
+  failedMarkerExists: boolean;
 }
 
 export interface NextPhaseReady {
@@ -25,7 +27,8 @@ export interface NextPhaseNotReady {
     | 'no-handoff-for-next-phase'
     | 'all-phases-started'
     | 'past-max-phase'
-    | 'next-phase-already-started';
+    | 'next-phase-already-started'
+    | 'phase-failed-blocked';
   details: string;
   scanned: PhaseStatus[];
 }
@@ -58,11 +61,14 @@ export async function scanPhases(repoRoot: string, config: Config): Promise<Phas
   for (let phase = 1; phase <= config.max_phase; phase++) {
     const handoffRel = handoffPathFor(config, phase);
     const startedRel = startedMarkerRelativePath(phase);
+    const failedRel = failedMarkerRelativePath(phase);
     const handoffAbs = path.join(repoRoot, handoffRel);
     const startedAbs = path.join(repoRoot, startedRel);
-    const [handoffExists, startedMarkerExists] = await Promise.all([
+    const failedAbs = path.join(repoRoot, failedRel);
+    const [handoffExists, startedMarkerExists, failedMarkerExists] = await Promise.all([
       pathExists(handoffAbs),
       pathExists(startedAbs),
+      pathExists(failedAbs),
     ]);
     phases.push({
       phase,
@@ -70,18 +76,24 @@ export async function scanPhases(repoRoot: string, config: Config): Promise<Phas
       handoffExists,
       startedMarkerPath: startedRel,
       startedMarkerExists,
+      failedMarkerPath: failedRel,
+      failedMarkerExists,
     });
   }
   return phases;
 }
 
 /**
- * Determines the next phase to fire. Rule (per locked product decision):
- *   A phase N is "ready" iff its handoff exists AND its started-marker does NOT.
+ * Determines the next phase to fire. Rule (per locked product decision + Codex
+ * review round 1):
+ *   A phase N is "ready" iff handoff exists AND both .started AND .failed
+ *   markers are absent.
  *
- * We scan from phase 1 upward and pick the FIRST ready phase. This handles the
- * cold-start case (phase 1 with no marker yet) and the steady-state case
- * (phase K+1 ready after phase K's marker landed) with the same loop.
+ * `.failed` blocks readiness so a stale failed run can't be retried by deleting
+ * only `.started` — the operator must consciously clear both markers, which is
+ * the only way to convert "failed, needs attention" → "ready to retry".
+ *
+ * We scan from phase 1 upward and pick the FIRST ready phase.
  */
 export async function resolveNextPhase(
   repoRoot: string,
@@ -89,8 +101,25 @@ export async function resolveNextPhase(
 ): Promise<NextPhaseResolution> {
   const phases = await scanPhases(repoRoot, config);
 
+  // ANY failed phase blocks the whole orchestrator globally — phase N+1's
+  // kickoff usually assumes phase N completed correctly, so silently advancing
+  // past a failed phase would mask real problems. Operator must clear both
+  // markers (retry) or just .failed (mark done) to unblock.
+  const failedBlocked = phases.find((p) => p.failedMarkerExists);
+  if (failedBlocked) {
+    return {
+      kind: 'not-ready',
+      reason: 'phase-failed-blocked',
+      details:
+        `Phase ${failedBlocked.phase} has a .failed marker at ${failedBlocked.failedMarkerPath} — ` +
+        'orchestrator refuses to advance until an operator deletes both .started and .failed (to retry) ' +
+        'or just .failed (to mark the phase done without retrying).',
+      scanned: phases,
+    };
+  }
+
   for (const status of phases) {
-    if (status.handoffExists && !status.startedMarkerExists) {
+    if (status.handoffExists && !status.startedMarkerExists && !status.failedMarkerExists) {
       return {
         kind: 'ready',
         phase: status.phase,
@@ -110,9 +139,13 @@ export async function resolveNextPhase(
     };
   }
 
-  const someHandoffMissing = phases.some((p) => !p.handoffExists && !p.startedMarkerExists);
+  const someHandoffMissing = phases.some(
+    (p) => !p.handoffExists && !p.startedMarkerExists && !p.failedMarkerExists,
+  );
   if (someHandoffMissing) {
-    const first = phases.find((p) => !p.handoffExists && !p.startedMarkerExists)!;
+    const first = phases.find(
+      (p) => !p.handoffExists && !p.startedMarkerExists && !p.failedMarkerExists,
+    )!;
     return {
       kind: 'not-ready',
       reason: 'no-handoff-for-next-phase',
@@ -124,7 +157,7 @@ export async function resolveNextPhase(
   return {
     kind: 'not-ready',
     reason: 'next-phase-already-started',
-    details: 'No phase is in the (handoff-present, marker-absent) state.',
+    details: 'No phase is in the (handoff-present, no-markers) state.',
     scanned: phases,
   };
 }

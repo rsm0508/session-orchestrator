@@ -33,7 +33,12 @@ export type ClaudeResultEnvelope = {
   terminal_reason?: string;
 };
 
-export type FireFailureReason = 'spawn-failure' | 'non-zero-exit' | 'envelope-error' | 'timeout';
+export type FireFailureReason =
+  | 'marker-collision'
+  | 'spawn-failure'
+  | 'non-zero-exit'
+  | 'envelope-error'
+  | 'timeout';
 
 export interface FireSuccess {
   kind: 'success';
@@ -174,11 +179,33 @@ export async function fireHeadlessSession(opts: FireOptions): Promise<FireResult
 
   await fs.mkdir(runsDir, { recursive: true });
 
-  await fs.writeFile(
-    startedMarkerPath,
-    `started phase ${opts.phase} at ${startedAt.toISOString()}\nrun log: ${logPath}\n`,
-    'utf8',
-  );
+  // Authoritative duplicate-fire guard: exclusive-create the .started marker.
+  // The pre-check in run.ts catches the common case early for UX, but two
+  // concurrent triggers (PR-merge + cron in the same minute) can both pass that
+  // check before either writes. `flag: 'wx'` makes the marker write atomic — the
+  // second writer hits EEXIST and we bow out without spawning a duplicate session.
+  try {
+    await fs.writeFile(
+      startedMarkerPath,
+      `started phase ${opts.phase} at ${startedAt.toISOString()}\nrun log: ${logPath}\n`,
+      { encoding: 'utf8', flag: 'wx' },
+    );
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      const collisionAt = now();
+      return {
+        kind: 'failure',
+        reason: 'marker-collision',
+        exitCode: -1,
+        durationMs: collisionAt.getTime() - t0,
+        logPath,
+        startedMarkerPath,
+        failedMarkerPath,
+        spawnError: `EEXIST: marker already present at ${startedMarkerPath} — another fire is in flight (or a stale marker needs cleanup)`,
+      };
+    }
+    throw err;
+  }
 
   const args = buildClaudeArgs({ config: opts.config });
   const bin = resolveClaudeBin(opts);

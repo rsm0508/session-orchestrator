@@ -306,6 +306,33 @@ describe('fireHeadlessSession — failure paths', () => {
     await expect(fs.access(result.failedMarkerPath)).resolves.toBeUndefined();
   });
 
+  it('marker collision (concurrent fire): refuses to spawn, returns marker-collision', async () => {
+    // Simulate the race: a sibling job already wrote the .started marker between
+    // run.ts's pre-check and our exclusive write. The wrapper MUST NOT invoke
+    // execa, MUST NOT write .failed, MUST surface marker-collision to the caller.
+    const markersDir = path.join(tmpRoot, '.session-orchestrator');
+    await fs.mkdir(markersDir, { recursive: true });
+    await fs.writeFile(path.join(markersDir, 'phase-1.started'), 'sibling already here\n', 'utf8');
+
+    const execa = vi.fn(); // must NOT be called
+
+    const result = await fireHeadlessSession(
+      baseOpts({ execaFn: execa as unknown as typeof realExeca }),
+    );
+
+    expect(execa).not.toHaveBeenCalled();
+    expect(result.kind).toBe('failure');
+    if (result.kind !== 'failure') return;
+    expect(result.reason).toBe('marker-collision');
+    expect(result.spawnError).toContain('EEXIST');
+
+    // .failed must NOT be written — the prior fire owns the failure semantics
+    await expect(fs.access(result.failedMarkerPath)).rejects.toThrow();
+    // sibling .started should be intact (not clobbered)
+    const sibling = await fs.readFile(path.join(markersDir, 'phase-1.started'), 'utf8');
+    expect(sibling).toBe('sibling already here\n');
+  });
+
   it('timeout result → timeout failure + .failed written', async () => {
     const execa = makeTimedOut('{"type":"result","is_error":false}');
 

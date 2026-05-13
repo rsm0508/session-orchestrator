@@ -97,13 +97,29 @@ export function renderDigest(input: DigestInput): string {
   let retryBlock = '';
   if (!isSuccess) {
     const f = result as Extract<FireResult, { kind: 'failure' }>;
-    retryBlock =
-      '\n\n**To retry:** delete `' +
-      relMarker(f.startedMarkerPath, config) +
-      '` AND `' +
-      relMarker(f.failedMarkerPath, config) +
-      '` on the default branch, then push (or wait for the next scheduled run).\n' +
-      '**To roll back without retrying:** delete just the `.started` marker.\n';
+    if (f.reason === 'marker-collision') {
+      // No retry semantics: the prior fire owns the markers + digest.
+      retryBlock =
+        '\n\n**Note:** Another fire is in flight (or a stale `.started` marker remains). ' +
+        'No `.failed` marker was written by this run — the in-flight fire will post its own digest when it finishes. ' +
+        'If the prior fire crashed and the marker is stale, delete `' +
+        relMarker(f.startedMarkerPath, config) +
+        '` on the default branch and retry.\n';
+    } else {
+      // `.failed` blocks readiness (see resolveNextPhase). Both markers must be
+      // deleted to retry. Operator can also mark the phase as "done despite the
+      // failure" by deleting only `.failed`, keeping `.started` as audit trail.
+      retryBlock =
+        '\n\n**To retry:** delete BOTH `' +
+        relMarker(f.startedMarkerPath, config) +
+        '` AND `' +
+        relMarker(f.failedMarkerPath, config) +
+        '` on the default branch, then push (or wait for the next scheduled run).\n' +
+        '**To mark phase done without retrying** (treat the failure as acceptable, advance to next phase): ' +
+        'delete just `' +
+        relMarker(f.failedMarkerPath, config) +
+        '` — `.started` stays as audit trail.\n';
+    }
   }
 
   return [`## ${title}`, '', table, '', sessionBlock, retryBlock].join('\n');

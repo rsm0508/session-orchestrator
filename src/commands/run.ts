@@ -70,18 +70,33 @@ export default class Run extends Command {
       });
     }
 
+    const failedAbs = path.join(repoRoot, failedRel);
     let markerExists = false;
+    let failedExists = false;
     try {
       await fs.access(startedAbs);
       markerExists = true;
     } catch {
       // expected
     }
+    try {
+      await fs.access(failedAbs);
+      failedExists = true;
+    } catch {
+      // expected
+    }
 
-    if (markerExists) {
+    if (markerExists || failedExists) {
+      // Friendly UX pre-check. The wrapper's exclusive-create on .started is the
+      // authoritative race-safe guard; this just catches the common case earlier
+      // with a clearer message.
+      const which: string[] = [];
+      if (markerExists) which.push(startedRel);
+      if (failedExists) which.push(failedRel);
       this.error(
-        `Phase ${flags.phase} already has a started-marker at ${startedRel}. ` +
-          'Delete it (and any .failed sibling) to allow re-firing — intentional friction (see README).',
+        `Phase ${flags.phase} is already in a marker state: ${which.join(', ')}. ` +
+          'To retry, delete BOTH markers. To mark phase done without retrying, ' +
+          `delete just ${failedRel} (keeping ${startedRel} as audit trail).`,
         { exit: 2 },
       );
     }
@@ -139,7 +154,20 @@ export default class Run extends Command {
       this.exit(0);
     }
 
-    // failure path — .failed marker has already been written by the wrapper.
+    // failure path. For most reasons the wrapper has written a .failed marker.
+    // EXCEPTION: reason='marker-collision' means another fire is in flight (we
+    // never spawned); no .failed is written and the prior run will post its own
+    // digest when it finishes.
+    if (result.reason === 'marker-collision') {
+      this.log('[fire] REFUSED — phase already has a .started marker (another fire in flight).');
+      this.log(`  detail: ${result.spawnError ?? '(none)'}`);
+      this.log(
+        '  If the prior fire crashed and the marker is stale, delete ' +
+          `${startedRel} on the default branch and retry.`,
+      );
+      this.exit(4);
+    }
+
     this.log(`[fire] FAILED reason=${result.reason} exit=${result.exitCode}`);
     if (result.envelope) {
       this.log(`  envelope.subtype:    ${result.envelope.subtype ?? '(none)'}`);

@@ -2,29 +2,40 @@
 # Drop this file into any repo that wants the orchestrator to advance its phases automatically.
 
 # Human-readable label used in run logs + digest comments.
-project_name: "MCP v1.0"
+project_name: 'MCP v1.0'
 
 # Long-lived feature branch the orchestrator pushes phase work onto.
 # Each phase is a sub-PR off this branch, NOT off master.
-feature_branch: "feat/mcp-v1"
+feature_branch: 'feat/mcp-v1'
 
 # Where phase kickoff handoff docs live. {N} is the 1-indexed phase number.
-# The orchestrator scans for the highest N with a matching file, then checks
-# whether .session-orchestrator/phase-N.started exists — if missing, that phase is "ready".
-handoff_pattern: "docs/handoffs/mcp-phase-{N}-kickoff.md"
+# A phase N is "ready" iff this file exists for N AND neither
+# .session-orchestrator/phase-N.started nor .session-orchestrator/phase-N.failed exists.
+handoff_pattern: 'docs/handoffs/mcp-phase-{N}-kickoff.md'
 
 # Phase numbers run 1..max_phase. Past max_phase, the orchestrator reports "project done"
 # and stops trying to fire new phases.
 max_phase: 4
 
-# Optional. When set, the orchestrator can transition tickets on phase start/finish.
-# Linear's team prefix (e.g., "RAN" for the ai-viz Rankwize team).
-linear_team: "RAN"
-
-# Optional. Override the Claude Code model the headless session runs.
-# Defaults to claude-opus-4-7. Use claude-sonnet-4-6 for cheaper runs on lower-stakes work.
-claude_model: "claude-opus-4-7"
-
 # GitHub issue number on the CONSUMER repo where run digest comments get posted.
 # The orchestrator never opens new issues — it appends to this one.
 tracking_issue: 1
+
+# REQUIRED. Tools the headless session can call (passed verbatim to `claude --allowedTools`).
+# Space-separated. NEVER include `AskUserQuestion` — the orchestrator refuses to start
+# if it sees that, because a headless session can't answer back. Pre-flight every kickoff
+# to ensure all decisions are made upfront. Typical safe coding toolkit below:
+allowed_tools: 'Read Write Edit Bash Glob Grep'
+
+# REQUIRED. Hard $ cap per fire (passed to `claude --max-budget-usd`). Working Principle A
+# guardrail — without this even a trivial kickoff can burn cost cache-loading context.
+# Right-size for the phase's expected work (smallest typical fire ~$0.10, complex ~$3-5).
+max_budget_usd: 5.00
+
+# Optional. When set, the orchestrator can transition tickets on phase start/finish.
+# Linear's team prefix (e.g., "RAN" for the ai-viz Rankwize team).
+linear_team: 'RAN'
+
+# Optional. Override the Claude Code model the headless session runs.
+# Defaults to claude-opus-4-7. Use claude-sonnet-4-6 for cheaper runs on lower-stakes work.
+claude_model: 'claude-opus-4-7'

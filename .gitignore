@@ -3,6 +3,7 @@ dist/
 .session-orchestrator/runs/
 .session-orchestrator-paused
 *.log
+.codex-review-*.raw
 .env
 .env.local
 .DS_Store

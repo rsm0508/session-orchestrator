@@ -49,13 +49,21 @@ export default class Status extends Command {
     for (const p of phases) {
       const handoff = p.handoffExists ? 'handoff:yes' : 'handoff:no ';
       const marker = p.startedMarkerExists ? 'started:yes' : 'started:no ';
-      let label = 'pending';
-      if (p.handoffExists && p.startedMarkerExists) label = 'in-flight/done';
-      else if (p.handoffExists && !p.startedMarkerExists) label = 'READY';
-      else if (!p.handoffExists && p.startedMarkerExists)
+      const failed = p.failedMarkerExists ? 'failed:yes' : 'failed:no ';
+      let label: string;
+      if (!p.handoffExists && !p.startedMarkerExists && !p.failedMarkerExists) {
+        label = 'pending';
+      } else if (!p.handoffExists && (p.startedMarkerExists || p.failedMarkerExists)) {
         label = 'marker-without-handoff (manual cleanup?)';
+      } else if (p.failedMarkerExists) {
+        label = 'FAILED (blocked — operator must clear markers)';
+      } else if (p.startedMarkerExists) {
+        label = 'in-flight/done';
+      } else {
+        label = 'READY';
+      }
       this.log(
-        `  phase ${String(p.phase).padEnd(2)}  ${handoff}  ${marker}  [${label}]  ${p.handoffPath}`,
+        `  phase ${String(p.phase).padEnd(2)}  ${handoff}  ${marker}  ${failed}  [${label}]  ${p.handoffPath}`,
       );
     }
   }
